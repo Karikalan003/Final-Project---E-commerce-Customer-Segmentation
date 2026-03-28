@@ -106,3 +106,410 @@ print("📊 Gender Encoding:")
 print(df[['Gender', 'Gender_Encoded']].drop_duplicates())
 print("\nGender Distribution:")
 print(df['Gender'].value_counts())
+
+# ── Prepare Feature Matrix (drop non-feature columns) ────────
+# Drop Cust_ID (identifier) and original Gender (we use encoded version)
+df_features = df.drop(columns=['Cust_ID', 'Gender'])
+
+print(f"📐 Feature Matrix Shape: {df_features.shape}")
+print(f"   Features used: {df_features.columns.tolist()[:5]} ... ({df_features.shape[1]} total)")
+
+Exploratory Data Analysis (EDA)
+# ── Gender Distribution ───────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Count plot
+gender_counts = df['Gender'].value_counts()
+axes[0].bar(gender_counts.index, gender_counts.values,
+            color=['#FF6B9D', '#4ECDC4'], edgecolor='black', linewidth=0.8)
+axes[0].set_title('Gender Distribution', fontsize=14, fontweight='bold')
+axes[0].set_xlabel('Gender')
+axes[0].set_ylabel('Count')
+for i, v in enumerate(gender_counts.values):
+    axes[0].text(i, v + 5, str(v), ha='center', fontweight='bold')
+
+# Pie chart
+axes[1].pie(gender_counts.values, labels=gender_counts.index,
+            autopct='%1.1f%%', colors=['#FF6B9D', '#4ECDC4'],
+            startangle=90, explode=[0.05, 0.05])
+axes[1].set_title('Gender Proportion', fontsize=14, fontweight='bold')
+
+plt.suptitle('Customer Gender Analysis', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+
+# ── Orders Distribution ───────────────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Histogram
+axes[0].hist(df['Orders'], bins=30, color='#6C63FF', edgecolor='white', linewidth=0.5)
+axes[0].set_title('Distribution of Orders', fontsize=14, fontweight='bold')
+axes[0].set_xlabel('Number of Orders')
+axes[0].set_ylabel('Frequency')
+axes[0].axvline(df['Orders'].mean(), color='red', linestyle='--', label=f"Mean: {df['Orders'].mean():.1f}")
+axes[0].axvline(df['Orders'].median(), color='orange', linestyle='--', label=f"Median: {df['Orders'].median():.1f}")
+axes[0].legend()
+
+# Boxplot by Gender
+df.boxplot(column='Orders', by='Gender', ax=axes[1],
+           boxprops=dict(color='#6C63FF'),
+           medianprops=dict(color='red', linewidth=2))
+axes[1].set_title('Orders by Gender', fontsize=14, fontweight='bold')
+axes[1].set_xlabel('Gender')
+axes[1].set_ylabel('Orders')
+plt.suptitle('')
+
+plt.suptitle('Order Behavior Analysis', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.show()
+
+print("📊 Orders Statistics:")
+print(df['Orders'].describe())
+
+# ── Top 10 Most Searched Brands ──────────────────────────────
+# Exclude non-brand columns
+brand_cols = [col for col in df.columns if col not in ['Cust_ID', 'Gender', 'Orders', 'Gender_Encoded']]
+brand_totals = df[brand_cols].sum().sort_values(ascending=False)
+
+plt.figure(figsize=(14, 6))
+colors = plt.cm.RdYlGn(np.linspace(0.3, 0.9, 10))
+bars = plt.bar(brand_totals.head(10).index, brand_totals.head(10).values,
+               color=colors, edgecolor='black', linewidth=0.7)
+
+plt.title('Top 10 Most Searched Brands', fontsize=16, fontweight='bold')
+plt.xlabel('Brand', fontsize=12)
+plt.ylabel('Total Searches', fontsize=12)
+plt.xticks(rotation=45, ha='right')
+
+for bar, val in zip(bars, brand_totals.head(10).values):
+    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 20,
+             f'{val:,}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+# ── Correlation Heatmap (Top Features) ───────────────────────
+# Show correlation of Orders + top 10 brands
+top_brands = brand_totals.head(10).index.tolist()
+corr_cols = ['Orders'] + top_brands
+corr_matrix = df[corr_cols].corr()
+
+plt.figure(figsize=(12, 10))
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+sns.heatmap(corr_matrix, mask=mask, annot=True, fmt='.2f',
+            cmap='coolwarm', center=0, linewidths=0.5,
+            annot_kws={'size': 9})
+plt.title('Correlation Heatmap (Orders + Top 10 Brands)', fontsize=14, fontweight='bold')
+plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+plt.show()
+
+# ── StandardScaler: mean=0, std=1 ────────────────────────────────
+# K-Means is distance-based → scaling is CRITICAL
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(df_features)
+
+print(f"✅ Scaling complete!")
+print(f"   Shape: {X_scaled.shape}")
+print(f"   Mean (should be ~0): {X_scaled.mean():.4f}")
+print(f"   Std  (should be ~1): {X_scaled.std():.4f}")
+
+
+Finding Optimal K
+Method 1: Elbow Method (WCSS) | Method 2: Silhouette Score
+# ── Elbow Method + Silhouette Score ──────────────────────────
+k_range = range(2, 11)  # Test K from 2 to 10
+wcss = []               # Within-Cluster Sum of Squares
+silhouette_scores = []  # Silhouette Scores
+
+print("⏳ Computing scores for K = 2 to 10...\n")
+print(f"{'K':>3} | {'WCSS':>12} | {'Silhouette Score':>17}")
+print("-" * 38)
+
+for k in k_range:
+    kmeans = KMeans(
+        n_clusters=k,
+        init='k-means++',   # Smart initialization → faster convergence
+        n_init=10,          # Run 10 times, pick best
+        max_iter=300,
+        random_state=42
+    )
+    kmeans.fit(X_scaled)
+    wcss.append(kmeans.inertia_)
+    sil = silhouette_score(X_scaled, kmeans.labels_)
+    silhouette_scores.append(sil)
+    print(f"  {k:>1} | {kmeans.inertia_:>12.2f} | {sil:>17.4f}")
+
+print("\n✅ Done!")
+
+# ── Plot Elbow Curve & Silhouette Scores ─────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+# --- Elbow Curve ---
+axes[0].plot(list(k_range), wcss, 'bo-', linewidth=2.5, markersize=8, color='#E74C3C')
+axes[0].set_title('Elbow Method — Finding Optimal K', fontsize=14, fontweight='bold')
+axes[0].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[0].set_ylabel('WCSS (Inertia)', fontsize=12)
+axes[0].set_xticks(list(k_range))
+axes[0].grid(True, alpha=0.4)
+
+# Annotate each point
+for k, w in zip(k_range, wcss):
+    axes[0].annotate(f'{w:.0f}', (k, w), textcoords='offset points',
+                     xytext=(0, 10), ha='center', fontsize=8)
+
+# --- Silhouette Score ---
+bars = axes[1].bar(list(k_range), silhouette_scores,
+                   color=['#27AE60' if s == max(silhouette_scores) else '#3498DB'
+                          for s in silhouette_scores],
+                   edgecolor='black', linewidth=0.8)
+axes[1].set_title('Silhouette Score vs K', fontsize=14, fontweight='bold')
+axes[1].set_xlabel('Number of Clusters (K)', fontsize=12)
+axes[1].set_ylabel('Silhouette Score', fontsize=12)
+axes[1].set_xticks(list(k_range))
+axes[1].grid(True, alpha=0.4, axis='y')
+
+# Annotate bars
+for bar, score in zip(bars, silhouette_scores):
+    axes[1].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.002,
+                 f'{score:.3f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+optimal_k = list(k_range)[silhouette_scores.index(max(silhouette_scores))]
+axes[1].set_title(f'Silhouette Score vs K\n(Best K = {optimal_k}, Score = {max(silhouette_scores):.4f})',
+                  fontsize=13, fontweight='bold', color='green')
+
+plt.tight_layout()
+plt.savefig('optimal_k_selection.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+print(f"\n🏆 Optimal K = {optimal_k} (Highest Silhouette Score: {max(silhouette_scores):.4f})")
+
+# ── Train Final K-Means Model ────────────────────────────────
+OPTIMAL_K = optimal_k  # Automatically set from Step 6
+
+final_kmeans = KMeans(
+    n_clusters=OPTIMAL_K,
+    init='k-means++',
+    n_init=10,
+    max_iter=300,
+    random_state=42
+)
+
+final_kmeans.fit(X_scaled)
+df['Cluster'] = final_kmeans.labels_
+
+print(f"✅ K-Means model trained with K = {OPTIMAL_K}")
+print(f"   Final Inertia (WCSS): {final_kmeans.inertia_:.2f}")
+print(f"   Silhouette Score    : {silhouette_score(X_scaled, final_kmeans.labels_):.4f}")
+print(f"\n📊 Cluster Distribution:")
+print(df['Cluster'].value_counts().sort_index())
+
+# ── Cluster Size Distribution ────────────────────────────────
+cluster_counts = df['Cluster'].value_counts().sort_index()
+
+plt.figure(figsize=(10, 5))
+colors = plt.cm.Set3(np.linspace(0, 1, OPTIMAL_K))
+bars = plt.bar([f'Cluster {i}' for i in cluster_counts.index],
+               cluster_counts.values, color=colors, edgecolor='black', linewidth=0.8)
+
+plt.title('Customer Distribution Across Clusters', fontsize=14, fontweight='bold')
+plt.xlabel('Cluster')
+plt.ylabel('Number of Customers')
+
+for bar, val in zip(bars, cluster_counts.values):
+    pct = val / len(df) * 100
+    plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
+             f'{val}\n({pct:.1f}%)', ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+# ── Cluster-wise Statistical Summary ─────────────────────────
+print("📊 Cluster-wise Mean Values (Key Features):\n")
+
+# Mean of Orders and Gender by cluster
+cluster_summary = df.groupby('Cluster').agg(
+    Customer_Count=('Cust_ID', 'count'),
+    Avg_Orders=('Orders', 'mean'),
+    Male_Ratio=('Gender_Encoded', 'mean')
+).round(2)
+
+cluster_summary['Female_Ratio'] = (1 - cluster_summary['Male_Ratio']).round(2)
+print(cluster_summary)
+print("\n(Male_Ratio: 1.0 = all Male, 0.0 = all Female)")
+
+# ── Top Brands per Cluster ────────────────────────────────────
+print("🏆 Top 5 Brands Per Cluster:\n")
+
+for cluster_id in sorted(df['Cluster'].unique()):
+    cluster_data = df[df['Cluster'] == cluster_id][brand_cols]
+    top5 = cluster_data.mean().sort_values(ascending=False).head(5)
+    print(f"  Cluster {cluster_id} (n={len(cluster_data)}):")
+    for brand, score in top5.items():
+        print(f"    ↳ {brand:<25} avg_searches: {score:.2f}")
+    print()
+
+# ── Average Orders per Cluster ───────────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+# Bar chart - Avg Orders
+cluster_orders = df.groupby('Cluster')['Orders'].mean()
+colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(cluster_orders)))
+bars = axes[0].bar([f'C{i}' for i in cluster_orders.index],
+                   cluster_orders.values, color=colors, edgecolor='black')
+axes[0].set_title('Average Orders per Cluster', fontsize=13, fontweight='bold')
+axes[0].set_xlabel('Cluster')
+axes[0].set_ylabel('Avg Orders')
+for bar, val in zip(bars, cluster_orders.values):
+    axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05,
+                 f'{val:.1f}', ha='center', fontsize=11, fontweight='bold')
+
+# Box plot - Order distribution
+cluster_groups = [df[df['Cluster'] == c]['Orders'].values for c in sorted(df['Cluster'].unique())]
+bp = axes[1].boxplot(cluster_groups,
+                     labels=[f'Cluster {i}' for i in sorted(df['Cluster'].unique())],
+                     patch_artist=True,
+                     medianprops=dict(color='red', linewidth=2))
+for patch, color in zip(bp['boxes'], colors):
+    patch.set_facecolor(color)
+axes[1].set_title('Order Distribution by Cluster', fontsize=13, fontweight='bold')
+axes[1].set_xlabel('Cluster')
+axes[1].set_ylabel('Orders')
+
+plt.tight_layout()
+plt.show()
+
+# ── Gender Distribution per Cluster ──────────────────────────
+gender_cluster = df.groupby(['Cluster', 'Gender']).size().unstack(fill_value=0)
+gender_pct = gender_cluster.div(gender_cluster.sum(axis=1), axis=0) * 100
+
+gender_pct.plot(kind='bar', figsize=(12, 6), color=['#FF6B9D', '#4ECDC4'],
+                edgecolor='black', linewidth=0.8)
+plt.title('Gender Distribution per Cluster (%)', fontsize=14, fontweight='bold')
+plt.xlabel('Cluster', fontsize=12)
+plt.ylabel('Percentage (%)', fontsize=12)
+plt.xticks(rotation=0)
+plt.legend(title='Gender', fontsize=11)
+plt.tight_layout()
+plt.show()
+
+print("\n📋 Gender % per Cluster:")
+print(gender_pct.round(1))
+
+# ── PCA: Reduce to 2D for Visualization ───────────────────────
+pca_2d = PCA(n_components=2, random_state=42)
+X_pca_2d = pca_2d.fit_transform(X_scaled)
+
+explained_var = pca_2d.explained_variance_ratio_
+print(f"📉 PCA 2D Explained Variance:")
+print(f"   PC1: {explained_var[0]*100:.2f}%")
+print(f"   PC2: {explained_var[1]*100:.2f}%")
+print(f"   Total: {sum(explained_var)*100:.2f}%")
+
+# ── Plot 2D Clusters ─────────────────────────────────────────────
+plt.figure(figsize=(12, 8))
+scatter_colors = plt.cm.Set1(np.linspace(0, 1, OPTIMAL_K))
+
+for cluster_id in range(OPTIMAL_K):
+    mask = df['Cluster'] == cluster_id
+    plt.scatter(X_pca_2d[mask, 0], X_pca_2d[mask, 1],
+                c=[scatter_colors[cluster_id]], label=f'Cluster {cluster_id}',
+                alpha=0.6, s=50, edgecolors='white', linewidths=0.3)
+
+# Plot centroids
+centroids_2d = pca_2d.transform(final_kmeans.cluster_centers_)
+plt.scatter(centroids_2d[:, 0], centroids_2d[:, 1],
+            marker='*', s=400, c='black', zorder=5, label='Centroids')
+
+plt.title(f'K-Means Clusters (K={OPTIMAL_K}) — PCA 2D Projection\n'
+          f'Variance Explained: {sum(explained_var)*100:.1f}%',
+          fontsize=14, fontweight='bold')
+plt.xlabel(f'PC1 ({explained_var[0]*100:.1f}%)', fontsize=12)
+plt.ylabel(f'PC2 ({explained_var[1]*100:.1f}%)', fontsize=12)
+plt.legend(fontsize=11, loc='best')
+plt.tight_layout()
+plt.savefig('cluster_visualization_2d.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# ── PCA: 3D Cluster Plot ──────────────────────────────────────
+from mpl_toolkits.mplot3d import Axes3D
+
+pca_3d = PCA(n_components=3, random_state=42)
+X_pca_3d = pca_3d.fit_transform(X_scaled)
+ev3 = pca_3d.explained_variance_ratio_
+
+fig = plt.figure(figsize=(13, 9))
+ax = fig.add_subplot(111, projection='3d')
+
+for cluster_id in range(OPTIMAL_K):
+    mask = df['Cluster'] == cluster_id
+    ax.scatter(X_pca_3d[mask, 0], X_pca_3d[mask, 1], X_pca_3d[mask, 2],
+               c=[scatter_colors[cluster_id]], label=f'Cluster {cluster_id}',
+               alpha=0.5, s=30)
+
+ax.set_title(f'K-Means Clusters — PCA 3D Projection\nVariance: {sum(ev3)*100:.1f}%',
+             fontsize=13, fontweight='bold')
+ax.set_xlabel(f'PC1 ({ev3[0]*100:.1f}%)')
+ax.set_ylabel(f'PC2 ({ev3[1]*100:.1f}%)')
+ax.set_zlabel(f'PC3 ({ev3[2]*100:.1f}%)')
+ax.legend(fontsize=10)
+
+plt.tight_layout()
+plt.savefig('cluster_visualization_3d.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+
+# ── Heatmap: Cluster Profiles (Top Brands) ───────────────────
+top15_brands = brand_totals.head(15).index.tolist()
+heatmap_data = df.groupby('Cluster')[top15_brands + ['Orders']].mean()
+
+# Normalize each feature (0-1) for fair comparison
+heatmap_norm = (heatmap_data - heatmap_data.min()) / (heatmap_data.max() - heatmap_data.min())
+
+plt.figure(figsize=(16, 6))
+sns.heatmap(heatmap_norm, annot=True, fmt='.2f', cmap='YlOrRd',
+            linewidths=0.5, linecolor='gray',
+            annot_kws={'size': 9})
+plt.title('Cluster Profile Heatmap\n(Normalized: 0=Low Interest, 1=High Interest)',
+          fontsize=14, fontweight='bold')
+plt.xlabel('Brand / Feature', fontsize=11)
+plt.ylabel('Cluster', fontsize=11)
+plt.xticks(rotation=45, ha='right')
+plt.tight_layout()
+plt.savefig('cluster_heatmap.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+Export Results
+# ── Save Clustered Dataset ────────────────────────────────────────
+df.to_csv('Ecommerce_Clustered.csv', index=False)
+print("✅ Clustered dataset saved as 'Ecommerce_Clustered.csv'")
+print(f"   Columns: {df.columns.tolist()[-5:]} ... ('Cluster' added)")
+
+# ── Save Cluster Summary ──────────────────────────────────────────
+cluster_profile = df.groupby('Cluster')[top15_brands + ['Orders']].mean().round(2)
+cluster_profile.to_csv('Cluster_Profiles.csv')
+print("✅ Cluster profiles saved as 'Cluster_Profiles.csv'")
+
+Final Summary & Business Insights
+# ── Final Report ─────────────────────────────────────────────────
+print("=" * 60)
+print("        📦 E-COMMERCE SEGMENTATION SUMMARY")
+print("=" * 60)
+print(f"  Total Customers     : {len(df):,}")
+print(f"  Features Used       : {X_scaled.shape[1]}")
+print(f"  Optimal Clusters (K): {OPTIMAL_K}")
+print(f"  Silhouette Score    : {silhouette_score(X_scaled, final_kmeans.labels_):.4f}")
+print(f"  Final WCSS          : {final_kmeans.inertia_:.2f}")
+print("=" * 60)
+print("\n📌 Cluster Profiles:")
+
+for cluster_id in sorted(df['Cluster'].unique()):
+    cdf = df[df['Cluster'] == cluster_id]
+    top3 = cdf[brand_cols].mean().sort_values(ascending=False).head(3).index.tolist()
+    gender_maj = cdf['Gender'].value_counts().index[0]
+    print(f"\n  Cluster {cluster_id} ({len(cdf)} customers, {len(cdf)/len(df)*100:.1f}%):")
+    print(f"    Dominant Gender   : {gender_maj}")
+    print(f"    Avg Orders        : {cdf['Orders'].mean():.1f}")
+    print(f"    Top Brands        : {', '.join(top3)}")
+
+print("\n" + "=" * 60)
