@@ -1,0 +1,108 @@
+Project Flow
+Import Libraries
+Load & Explore Dataset
+Data Pre-Processing (Missing Values, Encoding)
+Exploratory Data Analysis (EDA)
+Feature Scaling
+Finding Optimal K (Elbow Method + Silhouette Score)
+Apply K-Means Clustering
+Cluster Analysis & Business Insights
+Visualization
+
+Import Libraries
+# ── Core Libraries ──────────────────────────────────────────────
+import numpy as np
+import pandas as pd
+
+# ── Visualization ────────────────────────────────────────────────
+import matplotlib.pyplot as plt
+import seaborn as sns
+%matplotlib inline
+plt.style.use('seaborn-v0_8-whitegrid')
+
+# ── Machine Learning ─────────────────────────────────────────────
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from sklearn.decomposition import PCA
+
+# ── Warnings ─────────────────────────────────────────────────────
+import warnings
+warnings.filterwarnings('ignore')
+
+print("✅ All libraries imported successfully!")
+
+
+Load & Explore the Dataset
+# ── Load Dataset ─────────────────────────────────────────────────
+# Replace 'Ecommerce.csv' with your actual filename
+df = pd.read_csv('cust_data.csv')
+
+print(f"📦 Dataset Shape: {df.shape}")
+print(f"   Rows    : {df.shape[0]}")
+print(f"   Columns : {df.shape[1]}")
+
+df.head()
+df.tail()
+print("📋 Columns:\n", df.columns.tolist())
+# ── Data Types ────────────────────────────────────────────────────
+print("🔎 Data Types:")
+print(df.dtypes)
+# ── Statistical Summary ───────────────────────────────────────────
+df.describe()
+
+
+Data Pre-Processing
+# ── Check Missing Values ──────────────────────────────────────
+missing = df.isnull().sum()
+missing_pct = (df.isnull().sum() / len(df)) * 100
+
+missing_df = pd.DataFrame({
+    'Missing Count': missing,
+    'Missing %': missing_pct
+}).query('`Missing Count` > 0')
+
+if missing_df.empty:
+    print("✅ No missing values found!")
+else:
+    print("⚠️ Missing Values Found:")
+    print(missing_df)
+
+# ── Handle Missing Values ────────────────────────────────────
+# For numerical columns → fill with median (robust to outliers)
+num_cols = df.select_dtypes(include=['int64', 'float64']).columns
+for col in num_cols:
+    if df[col].isnull().sum() > 0:
+        df[col].fillna(df[col].median(), inplace=True)
+        print(f"  ↳ Filled '{col}' with median: {df[col].median()}")
+
+# For categorical columns → fill with mode
+cat_cols = df.select_dtypes(include=['object']).columns
+for col in cat_cols:
+    if df[col].isnull().sum() > 0:
+        df[col].fillna(df[col].mode()[0], inplace=True)
+        print(f"  ↳ Filled '{col}' with mode: {df[col].mode()[0]}")
+
+print("\n✅ Missing value treatment complete!")
+print(f"   Remaining missing values: {df.isnull().sum().sum()}")
+
+# ──  Check for Duplicates ──────────────────────────────────────
+duplicates = df.duplicated().sum()
+print(f"🔁 Duplicate rows: {duplicates}")
+
+if duplicates > 0:
+    df.drop_duplicates(inplace=True)
+    print(f"   ↳ Removed {duplicates} duplicate rows.")
+    print(f"   New shape: {df.shape}")
+else:
+    print("✅ No duplicates found!")
+
+# ── Encode Gender Column ──────────────────────────────────────
+# M → 1, F → 0  (Label Encoding for binary category)
+le = LabelEncoder()
+df['Gender_Encoded'] = le.fit_transform(df['Gender'])
+
+print("📊 Gender Encoding:")
+print(df[['Gender', 'Gender_Encoded']].drop_duplicates())
+print("\nGender Distribution:")
+print(df['Gender'].value_counts())
